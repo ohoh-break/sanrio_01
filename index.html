@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>시나몬롤 점프 게임 (모바일 최적화)</title>
+  <style>
+    /* 전체 페이지 기본 설정 */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden; /* 스크롤 막기 (게임 전체를 화면에 꽉 차도록) */
+      background: #87CEEB; /* 하늘색 (캔버스 바깥 부분도 하늘색) */
+      -webkit-touch-callout: none; /* iOS에서 텍스트 선택 방지 */
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      touch-action: none; /* 드래그, 스크롤 방지 (게임 집중용) */
+    }
+    /* 캔버스 중앙 정렬 */
+    #gameCanvas {
+      display: block;
+      margin: 0 auto;
+      background: transparent;
+    }
+    /* 게임 오버 표시 */
+    #gameOverText {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 48px;
+      color: #000;
+      display: none; /* 처음에는 숨김 */
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+<div id="gameOverText">게임 오버!</div>
+
+<script>
+  // --- 전역 변수 정의 ---
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+  const gameOverText = document.getElementById("gameOverText");
+
+  // 화면 크기를 기기 화면에 맞춤
+  let SCREEN_WIDTH = window.innerWidth;
+  let SCREEN_HEIGHT = window.innerHeight;
+  canvas.width = SCREEN_WIDTH;
+  canvas.height = SCREEN_HEIGHT;
+
+  // 바닥 높이 설정 (바닥은 화면 하단에서 일정 높이만 차지)
+  const FLOOR_HEIGHT = 80; // 갈색 바닥 높이
+  const FLOOR_TOP = SCREEN_HEIGHT - FLOOR_HEIGHT;
+
+  // 캐릭터(시나몬롤) 관련
+  let cinnamorollImg = new Image();
+  cinnamorollImg.src = "cinnamoroll.png"; // 경로 조정
+  let cinnamorollWidth = 64;
+  let cinnamorollHeight = 64;
+  let cinnamorollX = 50;
+  let cinnamorollY = FLOOR_TOP - cinnamorollHeight; // 바닥 위에 올려놓음
+
+  // 점프 관련
+  let isJumping = false;
+  let jumpPower = 15; // 점프 초기 속도
+  let gravity = 0.8; // 중력
+  let velocityY = 0;
+
+  // 버섯(장애물) 관련
+  let mushroomImg = new Image();
+  mushroomImg.src = "mushroom.png";
+  let mushroomWidth = 32;
+  let mushroomHeight = 32;
+  let mushroomSpeed = 6;
+  let spawnInterval = 90; // 몇 프레임마다 버섯 생성
+  let spawnTimer = 0;
+  let mushrooms = [];
+
+  // 구름(배경 장식) 관련
+  // 간단히 흰 원 여러 개로 구름을 표현하고, 천천히 왼쪽으로 이동하도록 함
+  let clouds = [];
+  let cloudSpawnInterval = 120; // 몇 프레임마다 구름 생성
+  let cloudTimer = 0;
+
+  // 게임 오버
+  let gameOver = false;
+
+  // --- 메인 루프 ---
+  function gameLoop() {
+    if (!gameOver) {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    } else {
+      // 게임 오버 시 표시
+      gameOverText.style.display = "block";
+    }
+  }
+
+  // --- 게임 업데이트 ---
+  function update() {
+    // 점프 처리
+    if (isJumping) {
+      cinnamorollY += velocityY;
+      velocityY += gravity;
+
+      // 바닥에 닿으면 점프 종료
+      if (cinnamorollY >= FLOOR_TOP - cinnamorollHeight) {
+        cinnamorollY = FLOOR_TOP - cinnamorollHeight;
+        isJumping = false;
+      }
+    }
+
+    // 버섯 스폰
+    spawnTimer++;
+    if (spawnTimer >= spawnInterval) {
+      spawnTimer = 0;
+      mushrooms.push({
+        x: SCREEN_WIDTH,
+        y: FLOOR_TOP - mushroomHeight
+      });
+    }
+
+    // 버섯 이동 + 충돌 판정
+    for (let i = 0; i < mushrooms.length; i++) {
+      mushrooms[i].x -= mushroomSpeed;
+      // 충돌 판정 (단순 사각형 충돌)
+      if (checkCollision(
+        cinnamorollX, cinnamorollY, cinnamorollWidth, cinnamorollHeight,
+        mushrooms[i].x, mushrooms[i].y, mushroomWidth, mushroomHeight
+      )) {
+        gameOver = true;
+      }
+    }
+
+    // 화면 밖으로 나간 버섯 제거
+    mushrooms = mushrooms.filter(m => m.x > -mushroomWidth);
+
+    // 구름 스폰
+    cloudTimer++;
+    if (cloudTimer >= cloudSpawnInterval) {
+      cloudTimer = 0;
+      // 구름 랜덤 생성 (높이는 대략 상단 1/3 지점)
+      let cloudY = 30 + Math.random() * (SCREEN_HEIGHT / 3);
+      let cloudSize = 20 + Math.random() * 30; // 구름 크기(원 한 개 기준)
+      let cloudSpeed = 1 + Math.random() * 1.5; // 구름 이동 속도
+      clouds.push({
+        x: SCREEN_WIDTH,
+        y: cloudY,
+        size: cloudSize,
+        speed: cloudSpeed
+      });
+    }
+
+    // 구름 이동
+    for (let i = 0; i < clouds.length; i++) {
+      clouds[i].x -= clouds[i].speed;
+    }
+    // 화면 밖 구름 제거
+    clouds = clouds.filter(c => c.x > -100);
+  }
+
+  // --- 그리기 ---
+  function draw() {
+    // 전체 지우기 (하늘색 배경)
+    ctx.clearRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    // 1) 하늘색 배경은 body 자체가 이미 #87CEEB지만,
+    //    캔버스 위에 덮어쓸 수 있도록 다시 칠하고 싶다면 아래 주석 해제
+    // ctx.fillStyle = "#87CEEB"; // 하늘색
+    // ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    // 2) 구름(하얀색 원) 그리기
+    ctx.fillStyle = "#FFFFFF";
+    clouds.forEach(cloud => {
+      ctx.beginPath();
+      // 간단히 원 한 개로만 표시하거나, 여러 개 겹쳐서 구름 모양을 더 실감나게 만들 수도 있음
+      ctx.arc(cloud.x, cloud.y, cloud.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // 3) 갈색 바닥 그리기
+    ctx.fillStyle = "#8B4513"; // 갈색
+    ctx.fillRect(0, FLOOR_TOP, SCREEN_WIDTH, FLOOR_HEIGHT);
+
+    // 4) 시나몬롤 캐릭터 그리기
+    ctx.drawImage(cinnamorollImg, cinnamorollX, cinnamorollY, cinnamorollWidth, cinnamorollHeight);
+
+    // 5) 버섯 그리기
+    mushrooms.forEach(mushroom => {
+      ctx.drawImage(mushroomImg, mushroom.x, mushroom.y, mushroomWidth, mushroomHeight);
+    });
+  }
+
+  // --- 충돌 판정(사각형) ---
+  function checkCollision(x1, y1, w1, h1, x2, y2, w2, h2) {
+    if (
+      x1 < x2 + w2 &&
+      x1 + w1 > x2 &&
+      y1 < y2 + h2 &&
+      y1 + h1 > y2
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // --- 이벤트 처리 (점프) ---
+  document.addEventListener("keydown", function(e) {
+    if (e.code === "Space" && !isJumping && !gameOver) {
+      isJumping = true;
+      velocityY = -jumpPower;
+    }
+  });
+  // 마우스/터치로 점프
+  document.addEventListener("mousedown", function() {
+    if (!isJumping && !gameOver) {
+      isJumping = true;
+      velocityY = -jumpPower;
+    }
+  });
+  // 터치 이벤트 (스마트폰)
+  document.addEventListener("touchstart", function() {
+    if (!isJumping && !gameOver) {
+      isJumping = true;
+      velocityY = -jumpPower;
+    }
+  });
+
+  // --- 게임 시작 ---
+  window.onload = function() {
+    // iPhone 등 모바일 환경에서 화면 회전 시 다시 맞춤
+    window.addEventListener("resize", onResize, false);
+    gameLoop();
+  };
+
+  function onResize() {
+    // 화면 크기가 바뀔 때마다 캔버스를 다시 조정
+    SCREEN_WIDTH = window.innerWidth;
+    SCREEN_HEIGHT = window.innerHeight;
+    canvas.width = SCREEN_WIDTH;
+    canvas.height = SCREEN_HEIGHT;
+
+    // 바닥 위치 재계산
+    cinnamorollY = cinnamorollY - (FLOOR_TOP - (SCREEN_HEIGHT - FLOOR_HEIGHT)); 
+    // (단순히 캐릭터의 위치가 바닥에 고정되도록 하려면, 아래처럼 재설정 가능)
+    // cinnamorollY = SCREEN_HEIGHT - FLOOR_HEIGHT - cinnamorollHeight;
+
+    // 전역 변수를 업데이트
+  }
+</script>
+</body>
+</html>
